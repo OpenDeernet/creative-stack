@@ -443,6 +443,7 @@ def build_karaoke_plan(args, stem_base, dst):
         "accent": args.accent,
         "reaper": bool(args.reaper or dst.suffix.lower() == ".rpp"),
         "arm_mic": bool(args.arm_mic),
+        "autotune": bool(args.autotune),
         "monitoring": args.monitoring,
         "ocr_lyrics": bool(args.ocr_lyrics),
         "apply_live": bool(args.apply_live),
@@ -527,6 +528,8 @@ def main():
                     help="also emit a multi-track Reaper .rpp session alongside the output")
     ap.add_argument("--arm-mic", action="store_true",
                     help="arm Track 1 ('Lead Vocals (Mic)') for recording in the Reaper session")
+    ap.add_argument("--autotune", action="store_true",
+                    help="build the 10-track Auto-Tune & A/B Comparison studio (Bypass, ReaTune, ReaVocode, Graillon 3)")
     ap.add_argument("--monitoring", default="on", choices=["on", "off"],
                     help="input monitoring for --arm-mic (default: on)")
     ap.add_argument("--apply-live", action="store_true",
@@ -627,27 +630,46 @@ def main():
                                  src_media=vid_source, brand=plan.get("brand"))
             S.report(dst, "karaoke video")
 
-    if plan.get("reaper") or dst.suffix.lower() == ".rpp":
+    if plan.get("reaper") or plan.get("autotune") or dst.suffix.lower() == ".rpp":
         rpp_out = dst if dst.suffix.lower() == ".rpp" else stem_base.with_suffix(".rpp")
-        session_py = Path(__file__).resolve().parent / "session.py"
-        cmd = [sys.executable, str(session_py), "-o", str(rpp_out),
-               "--karaoke-backing", str(inst_wav),
-               "--tempo", str(plan.get("bpm", 120.0))]
-        if voc_wav.exists() and not plan.get("youtube"):
-            cmd += ["-t", f"{voc_wav}@0:-18"]
-        if vid_source and vid_source.exists():
-            cmd += ["--video", str(vid_source)]
-        if lyrics_md.exists():
-            cmd += ["--markers", str(lyrics_md)]
-        if plan.get("sing") and Path(plan["sing"]).exists():
-            cmd += ["--produce-vocal", str(plan["sing"])]
+        if plan.get("autotune"):
+            autotune_py = Path(__file__).resolve().parent / "autotune.py"
+            cmd = [sys.executable, str(autotune_py), "-o", str(rpp_out),
+                   "--karaoke-backing", str(inst_wav),
+                   "--bpm", str(plan.get("bpm", 120.0))]
+            if voc_wav.exists():
+                cmd += ["--reference-song", str(voc_wav)]
+            if vid_source and vid_source.exists():
+                cmd += ["--video", str(vid_source)]
+            if lyrics_md.exists():
+                cmd += ["--markers", str(lyrics_md)]
+            if plan.get("sing") and Path(plan["sing"]).exists():
+                cmd += ["--vocal-take", str(plan["sing"])]
             if plan.get("apply_live"):
                 cmd.append("--apply-live")
-        elif plan.get("arm_mic"):
-            cmd += ["--arm-mic", "--monitoring", plan.get("monitoring", "on")]
-        if plan.get("open"):
-            cmd.append("--open")
-        S.run(cmd)
+            if plan.get("open"):
+                cmd.append("--open")
+            S.run(cmd)
+        else:
+            session_py = Path(__file__).resolve().parent / "session.py"
+            cmd = [sys.executable, str(session_py), "-o", str(rpp_out),
+                   "--karaoke-backing", str(inst_wav),
+                   "--tempo", str(plan.get("bpm", 120.0))]
+            if voc_wav.exists() and not plan.get("youtube"):
+                cmd += ["-t", f"{voc_wav}@0:-18"]
+            if vid_source and vid_source.exists():
+                cmd += ["--video", str(vid_source)]
+            if lyrics_md.exists():
+                cmd += ["--markers", str(lyrics_md)]
+            if plan.get("sing") and Path(plan["sing"]).exists():
+                cmd += ["--produce-vocal", str(plan["sing"])]
+                if plan.get("apply_live"):
+                    cmd.append("--apply-live")
+            elif plan.get("arm_mic"):
+                cmd += ["--arm-mic", "--monitoring", plan.get("monitoring", "on")]
+            if plan.get("open"):
+                cmd.append("--open")
+            S.run(cmd)
 
     return 0
 

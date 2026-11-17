@@ -670,6 +670,148 @@ def demucs_cmd():
     return None
 
 
+def venv_python():
+    """Repo `.venv` Python interpreter when present, else `sys.executable`."""
+    candidate = REPO_ROOT / ".venv/bin/python"
+    if candidate.is_file() and os.access(candidate, os.X_OK):
+        return str(candidate)
+    return sys.executable
+
+
+# ------------------------------------------------------ plugins & voice-ai ---
+
+def user_vst3_dir():
+    """Writable user-scope VST3 directory (no sudo required)."""
+    override = os.environ.get("CREATIVE_STACK_VST3_DIR")
+    if override:
+        return Path(override).expanduser()
+    if IS_MAC:
+        return Path.home() / "Library/Audio/Plug-Ins/VST3"
+    return Path.home() / ".vst3"
+
+
+def vst3_dirs():
+    """Ordered VST3 scan directories (user scope first, then system scope)."""
+    user = user_vst3_dir()
+    if IS_MAC:
+        dirs = [user, Path("/Library/Audio/Plug-Ins/VST3")]
+    else:
+        dirs = [user, Path("/usr/local/lib/vst3"), Path("/usr/lib/vst3")]
+    return list(dict.fromkeys(dirs))
+
+
+def find_vst3(query):
+    """Locate an installed `.vst3` bundle matching `query` (exact or case-insensitive substring)."""
+    needle = (query or "").strip().lower()
+    if not needle:
+        return None
+    for directory in vst3_dirs():
+        if not directory.is_dir():
+            continue
+        exact = directory / (query if query.lower().endswith(".vst3") else f"{query}.vst3")
+        if exact.exists():
+            return exact
+        for entry in sorted(directory.glob("*.vst3")):
+            if needle in entry.name.lower():
+                return entry
+    return None
+
+
+def reaper_native_vst_lib(plugin_stem):
+    """Filename REAPER uses for its bundled Cockos VSTs (`reatune`, `reaeq`, ...)."""
+    return f"{plugin_stem}.vst.dylib" if IS_MAC else f"{plugin_stem}.vst.so"
+
+
+def reaper_resource_dir():
+    """User REAPER configuration directory where `reaper.ini` lives."""
+    if IS_MAC:
+        return Path.home() / "Library/Application Support/REAPER"
+    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "REAPER"
+
+
+def parse_reaper_ini_audio(text):
+    """Extract audio device, sample rate, and buffer latency from `reaper.ini` text."""
+    kv = {}
+    in_reaper = False
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        if not line or line.startswith(";"):
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            sec = line[1:-1].strip().lower()
+            in_reaper = sec in ("reaper", "audioconfig")
+            continue
+        if in_reaper and "=" in line:
+            k, _, v = line.partition("=")
+            kv[k.strip().lower()] = v.strip().strip('"')
+
+    in_dev = (kv.get("coreaudioindevnew") or kv.get("alsa_indev")
+              or kv.get("pulse_indev") or kv.get("asiodevice") or "")
+    out_dev = (kv.get("coreaudiooutdevnew") or kv.get("alsa_outdev")
+               or kv.get("pulse_outdev") or in_dev or "")
+
+    rate = 48000
+    for rkey in ("coreaudiosrate", "alsa_srate", "srate", "projsrate"):
+        if kv.get(rkey, "").isdigit() and int(kv[rkey]) > 0:
+            rate = int(kv[rkey])
+            break
+
+    buf = 512
+    buf_configured = False
+    for bkey in ("coreaudiobs", "alsa_bsize", "jack_bsize", "asio_bsize"):
+        if kv.get(bkey, "").isdigit() and int(kv[bkey]) > 0:
+            buf = int(kv[bkey])
+            buf_configured = True
+            break
+
+    # Round-trip buffer latency = input block + output block + ~1.5ms converter overhead
+    roundtrip_ms = round((2.0 * buf / float(rate)) * 1000.0 + 1.5, 2)
+    return {
+        "configured": bool(in_dev or out_dev or buf_configured),
+        "input_device": in_dev or None,
+        "output_device": out_dev or None,
+        "sample_rate": rate,
+        "buffer_samples": buf,
+        "estimated_roundtrip_ms": roundtrip_ms,
+        "low_latency_ok": roundtrip_ms <= 12.0,
+    }
+
+
+def reaper_audio_settings():
+    """Read `reaper.ini` when accessible and report audio buffer/device diagnostics."""
+    ini = reaper_resource_dir() / "reaper.ini"
+    try:
+        if ini.is_file():
+            data = parse_reaper_ini_audio(ini.read_text(encoding="utf-8", errors="replace"))
+            data["ini_path"] = str(ini)
+            return data
+    except OSError:
+        pass
+    data = parse_reaper_ini_audio("")
+    data["ini_path"] = str(ini)
+    return data
+
+
+def seed_vc_paths():
+    """Isolated Seed-VC installation paths (`~/.local/share/creative-stack/seed-vc`)."""
+    root = Path(os.environ.get(
+        "CREATIVE_STACK_SEED_VC",
+        Path.home() / ".local/share/creative-stack/seed-vc",
+    )).expanduser()
+    repo = root / "repo"
+    py = root / "venv/bin/python"
+    inf = repo / "inference.py"
+    gui = repo / "real-time-gui.py"
+    return {
+        "root": root,
+        "repo": repo,
+        "python": py,
+        "inference": inf,
+        "realtime_gui": gui,
+        "ready": bool(py.is_file() and os.access(py, os.X_OK) and inf.is_file()),
+    }
+
+
 # ----------------------------------------------------------------- secrets ---
 #
 # Secrets never go in creative-stack.env or a dotfile. macOS has Keychain;

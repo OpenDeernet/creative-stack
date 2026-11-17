@@ -1252,6 +1252,157 @@ class CadKernelTest(unittest.TestCase):
                                    bed_size=(256.0, 256.0, 256.0))
         self.assertFalse(huge["fits_bed"])
 
+    def test_hostenv_vst3_reaper_ini_and_seed_vc_helpers(self):
+        ini_text = (
+            "[REAPER]\n"
+            'coreaudioindevnew="Volt 276"\n'
+            'coreaudiooutdevnew="External Headphones"\n'
+            "coreaudiosrate=48000\n"
+            "coreaudiobs=128\n"
+        )
+        parsed = hostenv.parse_reaper_ini_audio(ini_text)
+        self.assertTrue(parsed["configured"])
+        self.assertEqual(parsed["input_device"], "Volt 276")
+        self.assertEqual(parsed["output_device"], "External Headphones")
+        self.assertEqual(parsed["sample_rate"], 48000)
+        self.assertEqual(parsed["buffer_samples"], 128)
+        self.assertLess(parsed["estimated_roundtrip_ms"], 10.0)
+        self.assertTrue(parsed["low_latency_ok"])
+
+        high_buf = hostenv.parse_reaper_ini_audio("[REAPER]\ncoreaudiobs=1024\ncoreaudiosrate=44100\n")
+        self.assertFalse(high_buf["low_latency_ok"])
+
+        with tempfile.TemporaryDirectory() as tmp:
+            vst_dir = Path(tmp) / "VST3"
+            bundle = vst_dir / "Auburn Sounds Graillon 3.vst3"
+            bundle.mkdir(parents=True)
+            with mock.patch.dict("os.environ", {"CREATIVE_STACK_VST3_DIR": str(vst_dir)}):
+                found = hostenv.find_vst3("Graillon")
+                self.assertEqual(found, bundle)
+                self.assertIsNone(hostenv.find_vst3("NonExistentPlugin"))
+
+            svc_dir = Path(tmp) / "seed-vc"
+            with mock.patch.dict("os.environ", {"CREATIVE_STACK_SEED_VC": str(svc_dir)}):
+                paths = hostenv.seed_vc_paths()
+                self.assertFalse(paths["ready"])
+                (svc_dir / "venv/bin").mkdir(parents=True)
+                (svc_dir / "repo").mkdir(parents=True)
+                py_bin = svc_dir / "venv/bin/python"
+                py_bin.write_text("#!/bin/sh\nexit 0\n")
+                py_bin.chmod(0o755)
+                (svc_dir / "repo/inference.py").write_text("# stub\n")
+                self.assertTrue(hostenv.seed_vc_paths()["ready"])
+
+
+class AutotunePureTest(unittest.TestCase):
+    def setUp(self):
+        sound_dir = str(ROOT / "skills/sound/scripts")
+        if sound_dir not in sys.path:
+            sys.path.insert(0, sound_dir)
+        import autotune  # noqa: E402
+        self.autotune = autotune
+
+    def test_scale_pitch_classes_and_reatune_bitmask(self):
+        at = self.autotune
+        # C Major: C, D, E, F, G, A, B -> indices 0, 2, 4, 5, 7, 9, 11
+        c_maj = at.scale_pitch_classes("C", "major")
+        self.assertEqual(c_maj, [1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1])
+        self.assertEqual(at.scale_note_names("C", "major"), ["C", "D", "E", "F", "G", "A", "B"])
+
+        # ReaTune bitmask: A=bit 0, A#=1, B=2, C=3, C#=4, D=5, D#=6, E=7, F=8, F#=9, G=10, G#=11
+        only_a = [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0]
+        self.assertEqual(at.reatune_scale_bitmask(only_a), 1)
+        only_c = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        self.assertEqual(at.reatune_scale_bitmask(only_c), 1 << 3)
+        chromatic = at.scale_pitch_classes("C", "chromatic")
+        self.assertEqual(at.reatune_scale_bitmask(chromatic), 0xFFF)
+
+        b64_lines = at.build_reatune_state_b64(c_maj, attack_ms=20, auto_enable=True)
+        self.assertEqual(len(b64_lines), 4)
+        self.assertEqual(b64_lines[-1], "AAAQAAAA")
+
+    def test_quantize_f0_and_pitch_benchmark_metrics(self):
+        at = self.autotune
+        c_maj = at.scale_pitch_classes("C", "major")
+        # 20 frames (0.00..0.38s at 20ms step) near E4 (329.63 Hz, sung +40c sharp ~337.3 Hz)
+        # followed by 20 frames (0.42..0.80s) near G4 (392.00 Hz, sung -45c flat ~381.9 Hz)
+        times = [round(i * 0.02, 3) for i in range(42)]
+        f0_hz = [337.3 if i < 20 else (0.0 if i == 20 else 381.9) for i in range(42)]
+        voiced = [i != 20 for i in range(42)]
+
+        events = at.quantize_f0_to_midi_events(times, f0_hz, voiced, scale_mask_c_to_b=c_maj)
+        self.assertEqual(len(events), 2)
+        self.assertEqual(events[0][2], 64)  # E4
+        self.assertEqual(events[1][2], 67)  # G4
+        self.assertLess(events[0][1], events[1][0])  # strict monophonic non-overlap
+
+        bad_metrics = at.compute_pitch_benchmark_metrics(
+            times, f0_hz, voiced, scale_mask_c_to_b=c_maj, target_events=events
+        )
+        self.assertGreater(bad_metrics["median_abs_cents"], 35.0)
+        self.assertEqual(bad_metrics["pct_within_25_cents"], 0.0)
+
+        # Corrected f0 on exact E4 (329.63 Hz) and G4 (392.00 Hz)
+        tuned_f0 = [329.63 if i < 20 else (0.0 if i == 20 else 392.00) for i in range(42)]
+        good_metrics = at.compute_pitch_benchmark_metrics(
+            times, tuned_f0, voiced, scale_mask_c_to_b=c_maj, target_events=events
+        )
+        self.assertLess(good_metrics["median_abs_cents"], 2.0)
+        self.assertEqual(good_metrics["pct_within_25_cents"], 100.0)
+
+    def test_build_autotune_rpp_lua_and_rig_toggle(self):
+        at = self.autotune
+        c_maj = at.scale_pitch_classes("C", "major")
+        plan = {
+            "key": "C",
+            "scale": "major",
+            "scale_notes": ["C", "D", "E", "F", "G", "A", "B"],
+            "scale_mask_c_to_b": c_maj,
+            "reatune_bitmask": at.reatune_scale_bitmask(c_maj),
+            "reatune_attack_ms": 20,
+            "bpm": 100.0,
+            "default_rig": "graillon",
+            "duration": 12.0,
+            "vocal_file": None,
+            "backing_file": None,
+            "melody_midi": None,
+            "video_file": None,
+            "graillon_vst3": "/Library/Audio/Plug-Ins/VST3/Auburn Sounds Graillon 3.vst3",
+            "backing_gain_db": -5.0,
+            "automation_points": [(0.0, 1.0)],
+            "eq": {
+                "hpf_hz": 95.0, "low_shelf_hz": 180.0, "low_shelf_db": 1.2,
+                "mud_hz": 330.0, "mud_db": -4.0, "mud_bw": 0.75,
+                "presence_hz": 3400.0, "presence_db": 4.2, "presence_bw": 1.1,
+                "air_hz": 10500.0, "air_db": 3.2,
+            },
+            "echo": {
+                "send_db": -12.5, "eighth_notes": 2.0, "feedback_norm": 0.3548,
+                "lowpass_hz": 3800.0, "highpass_hz": 220.0,
+            },
+            "reverb": {
+                "send_db": -10.5, "room_size": 0.72, "predelay_norm": 0.070,
+            },
+            "markers": [(0.0, "Intro")],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            rpp = Path(tmp) / "test.rpp"
+            rep = Path(tmp) / "report.txt"
+            at.build_autotune_rpp(rpp, plan)
+            rpp_text = rpp.read_text(encoding="utf-8")
+            self.assertIn('NAME "01 - Dry Mic Input (Record Here)"', rpp_text)
+            self.assertIn("MAINSEND 0 0", rpp_text)
+            self.assertIn('NAME "03 - Rig 1A: Stock ReaTune (Scale Snap)"', rpp_text)
+            self.assertIn('NAME "04 - Rig 1B: Stock ReaVocode (MIDI Vocoder)"', rpp_text)
+            self.assertIn('NAME "05 - Rig 2: Graillon 3 MIDI-Lock"', rpp_text)
+
+            toggled = at.toggle_rpp_rig_solo(rpp_text, "reatune", tmp, "reatune_stem", include_buses_and_backing=False)
+            self.assertIn('RENDER_PATTERN "reatune_stem"', toggled)
+
+            lua_code = at.build_autotune_lua(rpp, rep, plan)
+            self.assertIn('reaper.TrackFX_AddByName(gr_tr, "Graillon 3", false, -1)', lua_code)
+            self.assertIn("reaper.TrackFX_SetParam(gr_tr, gr_fx, 63, 0.0)", lua_code)
+
 
 if __name__ == "__main__":
     unittest.main()

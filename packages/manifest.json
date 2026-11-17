@@ -973,6 +973,36 @@
           "debian": null,
           "optional": true,
           "note": "open-source 2-channel CoreAudio HAL virtual loopback driver on macOS"
+        },
+        {
+          "id": "graillon",
+          "provides": [],
+          "brew": null,
+          "arch": null,
+          "debian": null,
+          "check": "test -d \"$HOME/Library/Audio/Plug-Ins/VST3/Auburn Sounds Graillon 3.vst3\" || test -d \"/Library/Audio/Plug-Ins/VST3/Auburn Sounds Graillon 3.vst3\" || test -d \"$HOME/.vst3/Auburn Sounds Graillon 3.vst3\"",
+          "fallback": {
+            "kind": "source",
+            "name": "graillon"
+          },
+          "gui": true,
+          "optional": true,
+          "note": "Auburn Sounds Graillon 3 Free VST3/LV2 real-time MIDI-target pitch correction plugin"
+        },
+        {
+          "id": "seed-vc",
+          "provides": [],
+          "brew": null,
+          "arch": null,
+          "debian": null,
+          "check": "test -x \"$HOME/.local/share/creative-stack/seed-vc/venv/bin/python\" && test -f \"$HOME/.local/share/creative-stack/seed-vc/repo/inference.py\"",
+          "fallback": {
+            "kind": "source",
+            "name": "seed-vc"
+          },
+          "optional": true,
+          "heavy": true,
+          "note": "isolated zero-shot Singing Voice Conversion (Plachtaa/seed-vc, pinned commit) for /sound autotune.py"
         }
       ]
     },

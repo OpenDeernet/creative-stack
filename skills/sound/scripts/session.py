@@ -436,6 +436,11 @@ def build_produced_rpp(dst, plan, backing_path, video_path=None, markers=None,
     rev_send_vol = db_to_linear_gain(plan["reverb"]["send_db"])
     back_vol = db_to_linear_gain(plan.get("backing_gain_db", -5.0))
     vocal_vol = db_to_linear_gain(1.0)
+    eq_lib = S.hostenv.reaper_native_vst_lib("reaeq")
+    comp_lib = S.hostenv.reaper_native_vst_lib("reacomp")
+    gate_lib = S.hostenv.reaper_native_vst_lib("reagate")
+    delay_lib = S.hostenv.reaper_native_vst_lib("readelay")
+    verb_lib = S.hostenv.reaper_native_vst_lib("reaverbate")
 
     lines = [
         '<REAPER_PROJECT 0.1 "7.0" 0',
@@ -471,10 +476,10 @@ def build_produced_rpp(dst, plan, backing_path, video_path=None, markers=None,
         "    LASTSEL 0",
         "    DOCKED 0",
         "    BYPASS 0 0 0",
-        '    <VST "VST: ReaEQ (Cockos) - Mastering Tone" reaeq.vst.dylib 0 "" 1919247729<56535472656571726561657100000000> ""',
+        f'    <VST "VST: ReaEQ (Cockos) - Mastering Tone" {eq_lib} 0 "" 1919247729<56535472656571726561657100000000> ""',
         "    >",
         "    BYPASS 0 0 0",
-        '    <VST "VST: ReaComp (Cockos) - Master Bus Glue" reacomp.vst.dylib 0 "" 1919247213<5653547265636D726561636F6D700000> ""',
+        f'    <VST "VST: ReaComp (Cockos) - Master Bus Glue" {comp_lib} 0 "" 1919247213<5653547265636D726561636F6D700000> ""',
         "    >",
         "    BYPASS 0 0 0",
         '    <JS loser/masterLimiter ""',
@@ -517,16 +522,16 @@ def build_produced_rpp(dst, plan, backing_path, video_path=None, markers=None,
         "      LASTSEL 1",
         "      DOCKED 0",
         "      BYPASS 0 0 0",
-        '      <VST "VST: ReaGate (Cockos) - Vocal Silence Gate" reagate.vst.dylib 0 "" 1919248244<56535472656774726561676174650000> ""',
+        f'      <VST "VST: ReaGate (Cockos) - Vocal Silence Gate" {gate_lib} 0 "" 1919248244<56535472656774726561676174650000> ""',
         "      >",
         "      BYPASS 0 0 0",
-        '      <VST "VST: ReaEQ (Cockos) - Vocal Presence & Air" reaeq.vst.dylib 0 "" 1919247729<56535472656571726561657100000000> ""',
+        f'      <VST "VST: ReaEQ (Cockos) - Vocal Presence & Air" {eq_lib} 0 "" 1919247729<56535472656571726561657100000000> ""',
         "      >",
         "      BYPASS 0 0 0",
-        '      <VST "VST: ReaComp (Cockos) - Peak Catcher (4:1)" reacomp.vst.dylib 0 "" 1919247213<5653547265636D726561636F6D700000> ""',
+        f'      <VST "VST: ReaComp (Cockos) - Peak Catcher (4:1)" {comp_lib} 0 "" 1919247213<5653547265636D726561636F6D700000> ""',
         "      >",
         "      BYPASS 0 0 0",
-        '      <VST "VST: ReaComp (Cockos) - Smooth Leveler (2.5:1)" reacomp.vst.dylib 0 "" 1919247213<5653547265636D726561636F6D700000> ""',
+        f'      <VST "VST: ReaComp (Cockos) - Smooth Leveler (2.5:1)" {comp_lib} 0 "" 1919247213<5653547265636D726561636F6D700000> ""',
         "      >",
         "      BYPASS 0 0 0",
         '      <JS Liteon/deesser ""',
@@ -560,10 +565,10 @@ def build_produced_rpp(dst, plan, backing_path, video_path=None, markers=None,
         "      LASTSEL 0",
         "      DOCKED 0",
         "      BYPASS 0 0 0",
-        '      <VST "VST: ReaDelay (Cockos) - Slap & Stereo Echo" readelay.vst.dylib 0 "" 1919247468<5653547265646C72656164656C617900> ""',
+        f'      <VST "VST: ReaDelay (Cockos) - Slap & Stereo Echo" {delay_lib} 0 "" 1919247468<5653547265646C72656164656C617900> ""',
         "      >",
         "      BYPASS 0 0 0",
-        '      <VST "VST: ReaEQ (Cockos) - Warm Echo Filter" reaeq.vst.dylib 0 "" 1919247729<56535472656571726561657100000000> ""',
+        f'      <VST "VST: ReaEQ (Cockos) - Warm Echo Filter" {eq_lib} 0 "" 1919247729<56535472656571726561657100000000> ""',
         "      >",
         "    >",
         "  >",
@@ -583,10 +588,10 @@ def build_produced_rpp(dst, plan, backing_path, video_path=None, markers=None,
         "      LASTSEL 0",
         "      DOCKED 0",
         "      BYPASS 0 0 0",
-        '      <VST "VST: ReaVerbate (Cockos) - Lush Vocal Plate" reaverbate.vst.dylib 0 "" 1919252066<56535472657662726561766572626174> ""',
+        f'      <VST "VST: ReaVerbate (Cockos) - Lush Vocal Plate" {verb_lib} 0 "" 1919252066<56535472657662726561766572626174> ""',
         "      >",
         "      BYPASS 0 0 0",
-        '      <VST "VST: ReaEQ (Cockos) - Abbey Road Reverb Curve" reaeq.vst.dylib 0 "" 1919247729<56535472656571726561657100000000> ""',
+        f'      <VST "VST: ReaEQ (Cockos) - Abbey Road Reverb Curve" {eq_lib} 0 "" 1919247729<56535472656571726561657100000000> ""',
         "      >",
         "    >",
         "  >",
@@ -606,7 +611,7 @@ def build_produced_rpp(dst, plan, backing_path, video_path=None, markers=None,
             "      LASTSEL 0",
             "      DOCKED 0",
             "      BYPASS 0 0 0",
-            '      <VST "VST: ReaEQ (Cockos) - Vocal Pocket Carve" reaeq.vst.dylib 0 "" 1919247729<56535472656571726561657100000000> ""',
+            f'      <VST "VST: ReaEQ (Cockos) - Vocal Pocket Carve" {eq_lib} 0 "" 1919247729<56535472656571726561657100000000> ""',
             "      >",
             "    >",
             "    <ITEM",
@@ -805,6 +810,14 @@ def main():
                     help="project tempo in BPM (default: 120)")
     ap.add_argument("--produce-vocal",
                     help="recorded vocal WAV to analyze, automate, and produce with native Reaper FX")
+    ap.add_argument("--autotune", action="store_true",
+                    help="build a 10-track Auto-Tune & A/B Comparison studio (Bypass, ReaTune, ReaVocode, Graillon 3)")
+    ap.add_argument("--key",
+                    help="musical key root for --autotune (e.g. C, F#, Bb); auto-detected if omitted")
+    ap.add_argument("--scale", default="auto",
+                    help="musical scale mode for --autotune (default: auto)")
+    ap.add_argument("--midi",
+                    help="monophonic vocal guide .mid for --autotune (Graillon 3 & ReaVocode)")
     ap.add_argument("--apply-live", action="store_true",
                     help="execute the generated .produce.lua in Reaper via -nonewinst and write fx-report.txt")
     ap.add_argument("--rate", type=int, default=S.RATE)
@@ -824,6 +837,32 @@ def main():
     dst.parent.mkdir(parents=True, exist_ok=True)
     if args.arm_mic:
         (dst.parent / "recordings").mkdir(parents=True, exist_ok=True)
+
+    if args.autotune:
+        autotune_py = Path(__file__).resolve().parent / "autotune.py"
+        cmd = [sys.executable, str(autotune_py), "-o", str(dst), "--bpm", str(args.tempo)]
+        if args.karaoke_backing:
+            cmd += ["--karaoke-backing", str(args.karaoke_backing)]
+        elif args.track:
+            cmd += ["--karaoke-backing", str(parse_track(args.track[0])[0])]
+        if args.produce_vocal:
+            cmd += ["--vocal-take", str(args.produce_vocal)]
+        if args.video:
+            cmd += ["--video", str(args.video)]
+        if args.markers:
+            cmd += ["--markers", str(args.markers)]
+        if args.key:
+            cmd += ["--key", str(args.key)]
+        if args.scale and args.scale != "auto":
+            cmd += ["--scale", str(args.scale)]
+        if args.midi:
+            cmd += ["--midi", str(args.midi)]
+        if args.apply_live:
+            cmd.append("--apply-live")
+        if args.open:
+            cmd.append("--open")
+        S.run(cmd)
+        return 0
 
     markers = parse_markers_file(args.markers) if args.markers else []
 

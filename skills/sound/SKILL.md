@@ -1,6 +1,6 @@
 ---
 name: sound
-description: Live capture via Loopback/Audio Hijack/PipeWire, voice cleanup, EBU R128 loudness, music beds and logo stings, ducked mixes, stem-separated karaoke with key shift, and Reaper sessions. Trigger via /sound.
+description: Live capture via Loopback/Audio Hijack/PipeWire, voice cleanup, EBU R128 loudness, music beds and logo stings, ducked mixes, stem-separated karaoke with key shift, real-time vocal Auto-Tune / MIDI pitch-locking / Seed-VC AI singing voice conversion, and Reaper sessions. Trigger via /sound.
 disable-model-invocation: true
 ---
 
@@ -133,6 +133,31 @@ you whether it hit the target.
    Audio Hijack 4 / Loopback 2 / PipeWire routing recipes, dual-stem karaoke recording setup, and
    platform mastering target table.
 
+8. **Wire a real-time vocal Auto-Tune + A/B comparison studio and pitch benchmark (`autotune.py`):**
+
+   ```bash
+   python3 scripts/autotune.py --check-setup
+   python3 scripts/autotune.py --karaoke-backing out/song/backing-track.wav \
+     --video out/song/karaoke-video.mp4 --markers out/song/lyrics.md \
+     --bpm 98 --apply-live -o out/song/autotune-studio.rpp
+   python3 scripts/autotune.py --synth-demo --benchmark --ai-voice auto --apply-live \
+     -o out/autotune-studio/autotune-demo.rpp
+   ```
+
+   Builds a 10-track REAPER `.rpp` project where Track 1 (`01 - Dry Mic Input`) has `MAINSEND 0 0`
+   and feeds Pre-FX sends (`AUXRECV ... mode=1`) to four parallel vocal rigs sharing identical
+   studio cleanup (`ReaGate`, `ReaEQ`, dual `ReaComp`, `JS: Liteon/deesser`) and Echo/Reverb buses:
+   * **Rig 0 (`02 - Rig 0: Bypass`)** — zero pitch shift (control baseline).
+   * **Rig 1A (`03 - Rig 1A: Stock ReaTune`)** — Cockos `ReaTune` with Automatic Pitch Correction
+     enabled (`words[4] = 1`), `20 ms` attack, and the song's exact 12-bit scale bitmask (`bit = (pc + 3) % 12`).
+   * **Rig 1B (`04 - Rig 1B: Stock ReaVocode`)** — 4-channel track combining the singer's voice on
+     Ch 1/2 (Detector) with a MIDI-driven `ReaSynth` saw/pulse carrier on Ch 3/4 from Track 6.
+   * **Rig 2 (`05 - Rig 2: Graillon 3 MIDI-Lock`)** — Auburn Sounds `Graillon 3` Free VST3 receiving
+     both the scale mask (`params 24..35`) and live monophonic MIDI guide notes from Track 6
+     (`param 56 MIDI In Enabled = 1.0`, `param 63 PTM Enabled = 0.0`).
+   * **Rig 4 (`--ai-voice`)** — Zero-shot singing voice conversion via `Plachtaa/seed-vc` on Apple
+     Silicon `MPS` (`f0_condition=True, auto_f0_adjust=True`).
+
 ---
 
 ## 💡 Concrete Example
@@ -220,6 +245,28 @@ python3 ../vidkit/scripts/publish.py -i ~/Movies/over-each-other-finale.mov \
   -o ~/Movies/over-each-other-finale.mp4 --copy-video
 ```
 
+### Example D — Real-Time Vocal Auto-Tune, MIDI Pitch-Locking & Objective A/B Benchmarking
+
+Set up a 10-track REAPER Auto-Tune comparison studio where even severely off-pitch singing is
+snapped to the song's scale (`ReaTune`) or hard-locked to the target melody MIDI (`Graillon 3` and
+`ReaVocode`), and run an objective `librosa.pyin` cent-error benchmark across all rigs:
+
+```bash
+# 1. verify REAPER audio buffer latency, Graillon 3 VST3, Demucs, and Seed-VC
+python3 scripts/autotune.py --check-setup
+
+# 2. run the synthetic out-of-tune vocal demo, render all rigs headlessly via REAPER + Seed-VC,
+#    and write out/autotune-studio/autotune-demo.benchmark.json
+python3 scripts/autotune.py --synth-demo --benchmark --ai-voice auto --apply-live \
+  -o out/autotune-studio/autotune-demo.rpp
+
+# 3. build a ready-to-sing live Auto-Tune project for an existing karaoke track
+python3 scripts/autotune.py --karaoke-backing out/over-each-other/backing-track.wav \
+  --video out/over-each-other/karaoke-video.mp4 \
+  --markers out/over-each-other/lyrics.md \
+  --bpm 98 --apply-live -o out/over-each-other/autotune-studio.rpp
+```
+
 ---
 
 ## 🚫 Hard Constraints
@@ -284,3 +331,18 @@ python3 ../vidkit/scripts/publish.py -i ~/Movies/over-each-other-finale.mov \
     project to `Backups/<stem>-raw-recording.rpp` first. `session.py --produce-vocal` writes the
     backup, emits `<stem>.produce.json` and `<stem>.produce.lua`, reloads via
     `reaper.Main_openProject("noprompt:...")`, and verifies every live parameter in `<stem>.fx-report.txt`.
+*   **NEVER** leave `MAINSEND 1 0` on the Dry Mic Input track (`Track 1`) or the Guide Melody Synth
+    track (`Track 6`) in an Auto-Tune session. If `Track 1` sends to the Master bus while also
+    feeding `ReaTune` / `Graillon 3`, the singer hears their raw out-of-tune voice mixed on top of
+    the pitch-corrected voice (phase-flanging chorus instead of pitch correction). Both feeder
+    tracks must set `MAINSEND 0 0`.
+*   **NEVER** assume `ReaTune`'s 12-bit scale bitmask starts on `C = bit 0`. `reatune.vst` indexes
+    its 12 scale checkboxes starting at `A = bit 0` (`A#=1, B=2, C=3 .. G#=11`), so standard pitch
+    class `pc` (`C=0 .. B=11`) must be mapped via `bit = (pc + 3) % 12` (`autotune.reatune_scale_bitmask()`).
+*   **NEVER** load Auburn Sounds `Graillon 3` for MIDI pitch-locking without setting parameter `56`
+    (`MIDI In Enabled`) to `1.0` and parameter `63` (`PTM Enabled`) to `0.0`. `Graillon 3` defaults
+    to `MIDI In Enabled = 0.0 (no)` and `PTM Enabled = 1.0 (yes)` (which adds frequency-shift
+    modulation unless disabled).
+*   **NEVER** emit overlapping MIDI notes in `<stem>.melody.mid` for `Graillon 3`. Its MIDI pitch
+    guide is monophonic; `autotune.quantize_f0_to_midi_events()` enforces a minimum gap between
+    each `note_off` and the next `note_on`.
